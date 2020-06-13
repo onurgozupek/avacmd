@@ -11,10 +11,10 @@ USERN=''
 # Your node password. Must be at least 8 characters and include a lowercase, an uppercase, a number an a special character
 PASSW=''
 #
-# Your Node ID. (leave black if you don't know)
+# Your Node ID. (leave blank if you don't know)
 NODEID=''
 #
-# Your AVA Address. (leave black if you don't know)
+# Your AVA Address. (leave blank if you don't know)
 AVAADR=''
 #
 # Default P-Chain ID (leave blank if you don't know)

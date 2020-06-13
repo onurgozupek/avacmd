@@ -1,0 +1,30 @@
+################################################
+# Settings for ava node command line script
+################################################
+#
+# IF YOU DON'T HAVE A NODE USER YET ADD YOUR DESIRED USERNAME AND PASSWORD AND THEN USE
+# ./avacmd.sh createuser default
+# 
+# Your node username
+USERN=''
+#
+# Your node password. Must be at least 8 characters and include a lowercase, an uppercase, a number an a special character
+PASSW=''
+#
+# Your Node ID. (leave black if you don't know)
+NODEID=''
+#
+# Your AVA Address. (leave black if you don't know)
+AVAADR=''
+#
+# Default P-Chain ID (leave blank if you don't know)
+PCHAIN=''
+#
+# Host or IP address which your node is running on (Default 127.0.0.1 or localhost)
+HOST='127.0.0.1'
+#
+# HTTP Port of node (Default 9650)
+PORT='9650'
+#
+# Stake length in days (Default 30 days)
+STAKEL='30'

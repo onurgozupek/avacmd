@@ -1,0 +1,948 @@
+#!/bin/sh
+SNAME=$(basename "$0")
+ANAME=$(uname -s)
+if [ $ANAME = "Darwin" ]
+then
+	ARCH="macos"
+else
+	ARCH="linux"
+fi
+echo ""
+
+icheck=1
+JQINS=$(which jq)
+if [ "$JQINS" = "" ]
+then
+	icheck=$(expr $icheck + 1)
+	echo "jq is required."
+fi
+AWKINS=$(which awk)
+if [ "$AWKINS" = "" ]
+then
+	icheck=$(expr $icheck + 1)
+	echo "awk is required."
+fi
+
+SEDINS=$(which sed)
+if [ "$SEDINS" = "" ]
+then
+	icheck=$(expr $icheck + 1)
+	echo "sed is required."
+fi
+
+CURLINS=$(which curl)
+if [ "$CURLINS" = "" ]
+then
+	icheck=$(expr $icheck + 1)
+	echo "curl is required."
+fi
+
+if [ $icheck -gt 1 ]
+then
+	echo ""
+	echo "You need to install the dependencies above."
+	echo ""
+	exit
+fi
+
+if test -f "settings.txt" ; then
+	. ./settings.txt
+	errn=0
+
+	if [ -z "${USERN}" ]
+	then
+		errn=$(expr $errn + 1)
+		echo "Username is missing."
+		echo "Edit settings.txt and set your username"
+	fi
+	if [ -z "${PASSW}" ]
+	then
+		errn=$(expr $errn + 1)
+		echo "Password is missing."
+		echo "Edit settings.txt and set your username"
+	fi
+	if [ ! -z "${USERN}" ] && [ ! -z "${PASSW}" ] && [ -z "${HOST}" ]
+	then
+		ln=$(awk '/HOST/{ print NR; exit }' settings.txt)
+		if [ $ln > 0 ]
+		then
+			sed ${ln}'s/.*/HOST='\'127.0.0.1\''/' settings.txt > settings2.txt
+			rm settings.txt
+			mv settings2.txt settings.txt
+		else
+			echo "\HOST='127.0.0.1'" >> settings.txt
+		fi
+	fi
+	if [ ! -z "${USERN}" ] && [ ! -z "${PASSW}" ] && [ -z "${PORT}" ]
+	then
+		ln=$(awk '/PORT/{ print NR; exit }' settings.txt)
+		if [ $ln > 0 ]
+		then
+			sed ${ln}'s/.*/PORT='\'9650\''/' settings.txt > settings2.txt
+			rm settings.txt
+			mv settings2.txt settings.txt
+		else
+			echo "\nPORT='9650'" >> settings.txt
+		fi
+	fi
+	if [ ! -z "${USERN}" ] && [ ! -z "${PASSW}" ] && [ -z "${NODEID}" ]
+	then
+		errn=$(expr $errn + 1)
+		echo "NODEID is missing in settings."
+		echo "Getting nodeid from your node..."
+		nodeid=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "admin.getNodeID","params":{},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/admin | jq -r ".result.nodeID")
+		ln=$(awk '/NODEID/{ print NR; exit }' settings.txt)
+		if [ $ln > 0 ]
+		then
+			sed ${ln}'s/.*/NODEID='\'${nodeid}\''/' settings.txt > settings2.txt
+			rm settings.txt
+			mv settings2.txt settings.txt
+		else
+			echo "\nNODEID='${nodeid}'" >> settings.txt
+		fi
+		errn=$(expr $errn - 1)
+	fi
+	if [ ! -z "${USERN}" ] && [ ! -z "${PASSW}" ] && [ -z "${AVAADR}" ]
+	then
+		errn=$(expr $errn + 1)
+		echo "AVA address is missing in settings."
+		echo "Getting AVA address from your node..."
+		avaaddr=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "avm.listAddresses","params":{"username":"'$USERN'","password": "'${PASSW}'" }, "id":1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/X)
+		if echo $avaaddr >/dev/null 2>&1 | jq -r ".result"; then
+			acc=$(echo $avaaddr | jq -r -c '.result.addresses')
+			cnt=0
+			for row in $(echo "${acc}" | jq -r '.[]'); do
+				_jq() {
+					echo ${row}
+				}
+				addr=$(echo $(_jq '.'))
+				break
+			done
+			if [ $cnt > 0 ]
+			then
+				ln=$(awk '/AVAADR/{ print NR; exit }' settings.txt)
+				if [ $ln > 0 ]
+				then
+					sed ${ln}'s/.*/AVAADR='\'${addr}\''/' settings.txt > settings2.txt
+					rm settings.txt
+					mv settings2.txt settings.txt
+				else
+					echo "\nAVAADR='${addr}'" >> settings.txt
+				fi
+				echo "Your AVA address is ${addr}"
+				echo "AVA address is added to settings"
+			else
+				echo "No accounts in your keystore. Create an account first."
+				errn=$(expr $errn + 1)
+			fi
+		else
+			echo $avaaddr
+		fi
+	fi
+	if [ ! -z "${USERN}" ] && [ ! -z "${PASSW}" ] && [ -z "${PCHAIN}" ]
+	then
+		echo "P-ChainID is missing."
+		echo "Getting P-ChainID from your node..."
+		accounts=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.listAccounts","params":{"username":"'$USERN'","password":"'$PASSW'"}, "id":1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+		if echo $accounts >/dev/null 2>&1 | jq -r ".result.accounts"; then
+			acc=$(echo $accounts | jq '.result.accounts')
+			cnt=0
+			for row in $(echo "${acc}" | jq -r '.[] | @base64'); do
+				_jq() {
+					echo ${row} | base64 --decode | jq -r ${1}
+				}
+				addr=$(echo $(_jq '.address'))
+				break
+			done
+			if [ $cnt > 0 ]
+			then
+			ln=$(awk '/PCHAIN/{ print NR; exit }' settings.txt)
+				if [ $ln > 0 ]
+				then
+					sed ${ln}'s/.*/PCHAIN='\'${addr}\''"/' settings.txt > settings2.txt
+					rm settings.txt
+					mv settings2.txt settings.txt
+				else
+					echo "\nPCHAIN='${addr}'" >> settings.txt
+				fi
+				echo "Your P-Chain address is ${addr}"
+				echo "P-Chain address is added to settings"
+			else
+				echo "No accounts in your keystore. Create an account first."
+				errn=$(expr $errn + 1)
+			fi
+		fi
+	fi
+	if [ ! -z "${USERN}" ] && [ ! -z "${PASSW}" ] && [ -z "${STAKEL}" ]
+	then
+		ln=$(awk '/STAKEL/{ print NR; exit }' settings.txt)
+		if [ $ln > 0 ]
+		then
+			sed ${ln}'s/.*/STAKEL='\'30\''/' settings.txt > settings2.txt
+			rm settings.txt
+			mv settings2.txt settings.txt
+		else
+			echo "\nSTAKEL='30'" >> settings.txt
+		fi
+	fi
+
+	CHECKNODE=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "admin.getNodeID","params":{},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/admin)
+	if [ -z $CHECKNODE ]
+	then
+		echo $CHECKNODE
+		echo "AVA node is not running on ${HOST}:${PORT}"
+		echo "Please check if your node is running and check your HOST & PORT settings"
+		echo ""
+		exit
+	fi
+
+	if [ $errn = 0 ]
+	then
+
+		if [ -z "$1" ]
+		then
+			echo "Usage:"
+			echo ""
+			echo "./${SNAME} command parameter1 parameter2"
+			echo ""
+			echo "Available commands:"
+			echo "balance\t\t\t\t\t Get AVA balance of your AVA address"
+			echo "balanceall\t\t\t\t Get all asset balances of your AVA address"
+			echo "createuser default\t\t\t Creates your user with the defined username and password in settings.txt"
+			echo "createuser username \"strongpass\"\t Creates the user with the given password. Password must be at least"
+			echo "\t\t\t\t\t 8 chars including a lowercase, an uppercase, a number and a special character"
+			echo "deleteuser username \"strongpass\"\t Deletes the user (Warning: Use with caution)"
+			echo "fundsubbet {amount} {days}\t\t Fund default subnet with the given amount and start staking for given days"
+			echo "\t\t\t\t\t If no amount is set, it uses all available balance (-100AVA)"
+			echo "\t\t\t\t\t If no stake length (in days) set, staking length will be 30 days"
+			echo "issuedbalance\t\t\t\t Get balance issued to P-Chain address"
+			echo "listpaccounts\t\t\t\t List all accounts on P-Chain"
+			echo "nodeid\t\t\t\t\t Get your NodeID"
+			echo "users\t\t\t\t\t List users"
+			echo "pendingvalidators\t\t\t List pending validators on default subnet"
+			echo "pendingvalidators onlyme\t\t List if your node is in pending validators on default subnet"
+			echo "stakeissued {days}\t\t\t Stake issued but not staked balance for given days on P-Chain address"
+			echo "tx TXID\t\t\t\t\t Get result of the given transaction (TXID mandatory)"
+			echo "validators\t\t\t\t List active validators on default subnet"
+			echo "validators onlyme\t\t\t List if your node is in active validators on default subnet"
+		else
+
+
+			if [ $1 = "nodeid" ]
+			then
+				res=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "admin.getNodeID","params":{},"id": 1}' \
+				-H 'content-type:application/json;' $HOST:$PORT/ext/admin | jq -r ".result.nodeID")
+				echo "Ava NodeID:" $res
+			fi
+
+			if [ $1 = "balance" ]
+			then
+				getbalance=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":3,"method":"avm.getBalance","params":{"address":"'$AVAADR'","assetID":"AVA"}}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/X)
+				if echo $getbalance >/dev/null 2>&1 | jq -r ".result.balance"; then
+					bln=$(echo $getbalance | jq -r ".result.balance")
+					echo "${AVAADR} Balance:" $bln "AVA"
+				else
+					echo "Error:"
+					echo $getbalance
+				fi
+			fi
+
+			if [ $1 = "balanceall" ]
+			then
+				getbalance=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":1,"method":"avm.getAllBalances","params":{"address":"'$AVAADR'"}}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/X)
+				result=$(echo $getbalance | jq -c -r '.result')
+				error=$(echo $getbalance | jq -c -r '.error')
+				if [ $result != "" ] && [ $result != "{}" ]
+				then
+					cbln=$(echo $getbalance | jq -c -r ".result.balances")
+					cnt=0
+					echo "Assets in your wallet:"
+					echo ""
+					for row in $(echo "${cbln}" | jq -r '.[] | @base64'); do
+						_jq() {
+							echo ${row} | base64 --decode | jq -r ${1}
+						}
+						asset=$(echo $(_jq '.asset'))
+						balance=$(echo $(_jq '.balance'))
+						cnt=$(expr $cnt + 1)
+						echo "${cnt}. ${balance} ${asset}"
+					done
+					if [ $cnt = 0 ]
+					then
+						echo ""
+						echo "No assets in your wallet"
+					fi
+				else
+					echo ""
+					echo "Error:"
+					echo $getbalance
+				fi
+			fi
+
+			if [ $1 = "users" ]
+			then
+				getusers=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":1,"method":"keystore.listUsers"}' -H 'content-type:application/json;' $HOST:$PORT/ext/keystore)
+				result=$(echo $getusers | jq -c -r '.result')
+				error=$(echo $getusers | jq -c -r '.error')
+				if [ $result != "" ] && [ $result != "{}" ]
+				then
+					usrs=$(echo $getusers | jq -c -r ".result.users")
+					echo "Users in your keystore:"
+					echo ""
+					cnt=0
+					for row in $(echo "${usrs}" | jq -r '.[] | @base64'); do
+						_jq() {
+							echo ${row} | base64 --decode
+						}	
+					cnt=$(expr $cnt + 1)
+					uname=$(echo $(_jq '.'))
+					echo "${cnt}. ${uname}"
+					done
+					if [ -z $cnt ]
+					then
+						echo "Your don't have a user"
+						echo "Your should create a user first:"
+						echo "./${SNAME} createuser yourusername \"yourstrongpassword\""
+					fi
+				fi
+			fi
+
+			if [ $1 = "createuser" ]
+			then
+				if [ "$2" = "default" ]
+				then
+					echo "Creating defined user ${USERN} with defined password in settings.txt"
+					createu=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":1,"method":"keystore.createUser", "params":{"username": "'$USERN'","password": "'$PASSW'"}}' -H 'content-type:application/json;' $HOST:$PORT/ext/keystore)
+					result=$(echo $createu | jq -r '.result.success')
+					if [ $result = "true" ]
+					then
+						echo ""
+						echo "User ${USERN} created."
+					else
+						message=$(echo $createu | jq -r '.error.message')
+						echo ""
+						echo "Error creating user:"
+						echo $message
+					fi
+
+				elif [ ! -z $2 ] && [ ! -z $3 ]
+				then
+					user=$2
+					pass=$3
+					plength=$(expr length $pass)
+
+					if [ $plength -gt 7 ]
+					then
+						echo ""
+						echo "Creating user for ${2}"
+						createu=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":1,"method":"keystore.createUser", "params":{"username": "'$user'","password": "'$pass'"}}' -H 'content-type:application/json;' $HOST:$PORT/ext/keystore)
+						result=$(echo $createu | jq -r '.result.success')
+						if [ $result = "true" ]
+						then
+							echo ""
+							echo "User ${2} created."
+						else
+							message=$(echo $createu | jq -r '.error.message')
+							echo ""
+							echo "Error creating user:"
+							echo $message
+						fi
+					else
+						echo ""
+						echo "Password is less than 8 characters."
+						echo "Please set a username and a strong password at least 8 characters. (password must be in double quotes)"
+						echo "for ex.:"
+						echo ""
+						echo "./${SNAME} myavanode \"aV@.n37w0#k\""
+					fi
+
+				elif [ -z $2 ] && [ -z $3 ]
+				then
+					echo ""
+					echo "You need to set your username and password"
+					echo "Please set a username and a strong password at least 8 characters. (password must be in double quotes)"
+					echo "for ex.:"
+					echo ""
+					echo "./${SNAME} myavanode \"aV@.n37w0#k\""
+				else
+					echo ""
+					echo "Password can not be blank (password must be in double quotes)"
+					echo "Please set a strong password at least 8 characters. (password must be in double quotes)"
+					echo "for ex.:"
+					echo ""
+					echo "./${SNAME} myavanode \"aV@.n37w0#k\""
+				fi
+			fi
+
+			if [ $1 = "deleteuser" ]
+			then
+				if [ ! -z $2 ] && [ ! -z $3 ]
+				then
+					user=$2
+					pass=$3
+
+					echo ""
+					echo "Deleting user ${2}"
+					createu=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":1,"method":"keystore.deleteUser", "params":{"username": "'$user'","password": "'$pass'"}}' -H 'content-type:application/json;' $HOST:$PORT/ext/keystore)
+					result=$(echo $createu | jq -r '.result.success')
+					if [ $result = "true" ]
+					then
+						echo ""
+						echo "User ${2} deleted."
+					else
+						message=$(echo $createu | jq -r '.error.message')
+						echo ""
+						echo "Error deleting user:"
+						echo $message
+					fi
+				elif [ -z $2 ] && [ -z $3 ]
+				then
+					echo ""
+					echo "You need to enter your username and password (password must be in double quotes)"
+					echo "for ex.:"
+					echo ""
+					echo "./${SNAME} deleteuser myavanode \"aV@.n37w0#k\""
+				else
+					echo ""
+					echo "Password can not be blank (password must be in double quotes)"
+					echo "for ex.:"
+					echo ""
+					echo "./${SNAME} deleteuser myavanode \"aV@.n37w0#k\""
+				fi
+			fi
+
+			if [ $1 = "tx" ]
+			then
+				if [ ! -z $2 ]
+				then
+					gettx=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":6,"method":"avm.getTxStatus","params" :{"txID":"'$2'"}}' \
+					-H 'content-type:application/json;' $HOST:$PORT/ext/bc/X)
+					if echo $accounts >/dev/null 2>&1 | jq -r ".result.status"; then
+						txstatus=$(echo $gettx | jq -r ".result.status")
+						echo "Tx ${2} is ${txstatus}"
+					fi
+				else
+				echo ""
+				echo "Transaction ID (TXID) required"
+				fi
+			fi
+
+			if [ $1 = "fundsubnet" ]
+			then
+				if [ -z $2 ]
+				then
+					getbalance=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":3,"method":"avm.getBalance","params":{"address":"'$AVAADR'","assetID":"AVA"}}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/X)
+					if echo $getbalance >/dev/null 2>&1 | jq -r ".result.balance"; then
+						gbalance=$(echo $getbalance | jq -r ".result.balance")
+						if [ $gbalance -gt 100 ]
+						then
+							famount=$(expr $galance - 100)
+						else
+							echo ""
+							echo "Your AVA balance ${gbalance} is lower than 100"
+						fi
+					else
+						echo "Error:"
+						echo $getbalance
+					fi
+				else
+					famount=$2
+					getbalance=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":3,"method":"avm.getBalance","params":{"address":"'$AVAADR'","assetID":"AVA"}}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/X)
+					if echo $getbalance >/dev/null 2>&1 | jq -r ".result.balance"; then
+						gbalance=$(echo $getbalance | jq -r ".result.balance")
+						if [ $gbalance < $famount ]
+						then
+							famount=0
+						fi
+					fi
+				fi
+				if [ ! -z $famount ]
+				then
+					request=$(curl -s -X POST --data '{"jsonrpc":"2.0","id":1,"method" :"avm.exportAVA","params" :{"to":"'$PCHAIN'","amount": '$2',"username": "'$USERN'","password": "'$PASSW'" }}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/X)
+					result=$(echo $request | jq -c -r '.result')
+					error=$(echo $request | jq -c -r '.error')
+					if [ $result != "" ] && [ $result != "{}" ]
+					then
+						echo "Subnet funded with" $2 "AVA"
+						txid=$(echo $request | jq -r ".result.txID")
+						echo "txID" $txid
+						echo ""
+						echo "Importing subnet"
+						getnonce=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getAccount","params":{"address":"'$PCHAIN'"},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+						result2=$(echo $getnonce | jq -c -r '.result')
+						error2=$(echo $getnonce | jq -c -r '.error')
+						if [ $result2 != "" ] && [ $result2 != "{}" ]
+						then
+							nonce=$(echo $getnonce | jq -r ".result.nonce")
+							pnonce=$(expr $nonce + 1)
+							request2=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.importAVA","params": {"username": "'$USERN'","password": "'$PASSW'","to":"'$PCHAIN'","payerNonce":'$pnonce'},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+							result3=$(echo $request2 | jq -c -r '.result')
+							error3=$(echo $request2 | jq -c -r '.error')
+							if [ $result3 != "" ] && [ $result3 != "{}" ]
+							then
+								imptxid=$(echo $request2 | jq -r ".result.tx")
+								echo "Subnet imported."
+								echo ""
+								echo "Issuing P-Chain"
+								echo ""
+								request3=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.issueTx","params": {"tx":"'$imptxid'"},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+								result4=$(echo $request3 | jq -c -r '.result')
+								error4=$(echo $request3 | jq -c -r '.error')
+								if [ $result4 != "" ] && [ $result4 != "{}" ]
+								then
+									echo "P-Chain Issued"
+									echo ""
+									echo "Checking issued balance"
+									request4=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getAccount","params":{"address":"'$PCHAIN'"},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+									result5=$(echo $request4 | jq -c -r '.result')
+									error5=$(echo $request4 | jq -c -r '.error')
+									if [ $result5 != "" ] && [ $result5 != "{}" ]
+									then
+										isbln=$(echo $request4 | jq -r ".result.balance")
+										echo "Issued balance" $isbln "AVA"
+										if [ $isbln > 0 ]
+										then
+											echo ""
+											echo "Creating unsigned transaction"
+											pnonce2=$(expr $pnonce + 1)
+											echo "Staking " $isbln "AVA"
+											if [ ! -z "$3" ]
+											then
+											STAKEL=$3
+											fi
+
+											cust=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.addDefaultSubnetValidator","params": {"id":"'$NODEID'","payerNonce":'$pnonce2',"destination":"'$PCHAIN'","startTime":'$(date --date="5 minutes" +%s)',"endTime":'$(date --date="$STAKEL days" +%s)',"stakeAmount":'$isbln'},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/P)
+											result6=$(echo $cust | jq -c -r '.result')
+											error6=$(echo $cust | jq -c -r '.error')
+											if [ $result6 != "" ] && [ $result6 != "{}" ]
+											then
+												unstx=$(echo $cust | jq -r ".result.unsignedTx")
+												echo "Success. TX created"
+												echo $unstx
+												echo ""
+												echo "Signing the transaction"
+												sigtx=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.sign","params": {"tx":"'$unstx'","signer":"'$PCHAIN'","username":"'$USERN'","password":"'$PASSW'"},"id": 2}' -H 'content-type:application/json;' $HOST:$PORT/ext/P)
+												result7=$(echo $sigtx | jq -c -r '.result')
+												error7=$(echo $sigtx | jq -c -r '.error')
+												if [ $result7 != "" ] && [ $result7 != "{}" ]
+												then
+													echo "Success. Transaction signed"
+													echo $sigtx | jq -r ".result.tx"
+													echo ""
+													stx=$(echo $sigtx | jq -r ".result.tx")
+													echo "Issuing transaction"
+													issutx=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.issueTx","params": {"tx":"'$stx'"},"id": 3}' -H 'content-type:application/json;' $HOST:$PORT/ext/P)
+													result8=$(echo $issutx | jq -c -r '.result')
+													error8=$(echo $issutx | jq -c -r '.error')
+													if [ $result8 != "" ] && [ $result8 != "{}" ]
+													then
+														echo "Success. Transaction issued"
+														echo $issutx | jq -r ".result.txID"
+														echo ""
+														echo "Getting pending validators"
+														pvald=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getPendingValidators","params": {},"id": 4}' -H 'content-type:application/json;' $HOST:$PORT/ext/P | jq '.result.validators')
+														cnt=0
+														for row in $(echo "${pvald}" | jq -r '.[] | @base64'); do
+															_jq() {
+																echo ${row} | base64 --decode | jq -r ${1}
+															}
+															addr=$(echo $(_jq '.address'))
+															if [ $addr = $PCHAIN ]
+															then
+																cnt=1
+																startt=$(echo $(_jq '.startTime'))
+																endt=$(echo $(_jq '.endTime'))
+																stakea=$(echo $(_jq '.stakeAmount'))
+																nid=$(echo $(_jq '.id'))
+																echo ""
+																echo "Your Node's pending staking details:"
+																echo "NodeID\t\t${nid}"
+																echo "P-Chain Address\t${addr}"
+																echo "Stake Amount\t${stakea} AVA"
+																if [ $ARCH = "macos" ]
+																then
+																	echo "Starting Time\t$(date -r ${startt} '+%a %d %b %Y %T %Z')"
+																	echo "Ending Time\t$(date -r ${endt} '+%a %d %b %Y %T %Z')"
+																else
+																	echo "Starting Time\t$(date -d @${startt} '+%a %d %b %Y %T %Z')"
+																	echo "Ending Time\t$(date -d @${endt} '+%a %d %b %Y %T %Z')"
+																fi
+																break
+															fi
+														done
+														if [ -z $cnt ]
+														then
+															echo ""
+															echo "Your node is not in pending validators"
+															echo "Your node is either accepted earlier or you need to wait a few seconds more."
+														fi
+													
+													else
+													echo "Error issuing transaction"
+													echo $issutx
+													fi
+												else
+												echo "Error signing transaction"
+												echo $sigtx
+												fi
+											else
+											echo "Error creating unsigned transaction"
+											echo $cust
+											fi
+										fi
+									fi
+								else
+									echo "Error Checking Issued Balance:"
+									echo $request3
+								fi
+							else
+								echo "Error Issuing P-Chain"
+								echo $request2
+							fi
+						else
+							echo "Error getting nonce"
+							echo $nonce
+						fi
+					else
+						echo "Error Funding Subnet:"
+						error=$(echo $request | jq -c -r '.error')
+						if [ $error != "" ] && [ $error != "{}" ]
+						then
+							mess=$(echo $request | jq -r ".error.message")
+							echo $mess
+						else
+							echo $request
+						fi
+					fi
+				else
+					echo "Amount is not set and could not get your free balance"
+					echo "Please try with setting a balance amount lower than available balance"
+					echo "ex. ./${SNAME} fundsubnet 1000 2"
+				fi
+			fi
+
+
+			if [ $1 = "issuedbalance" ]
+			then
+				echo "Checking issued balance"
+				request4=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getAccount","params":{"address":"'$PCHAIN'"},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+				result=$(echo $request4 | jq -c -r '.result')
+				error=$(echo $request4 | jq -c -r '.error')
+				if [ $result != "" ] && [ $result != "{}" ]
+				then
+					isbln=$(echo $request4 | jq -r ".result.balance")
+					nonce=$(echo $request4 | jq -r ".result.nonce")
+					echo ""
+					echo "Issued balance" $isbln "AVA (last nonce: ${nonce})"
+				elif [ $error != "" ]
+				then
+					echo ""
+					echo "Error:"
+					echo $(echo $error | jq -r ".message")
+				fi
+			fi
+
+			if [ $1 = "validators" ]
+			then
+				echo "Getting current validators"
+				gvalidators=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getCurrentValidators","params":{},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/P)
+				result=$(echo $gvalidators | jq -c -r '.result')
+				error=$(echo $gvalidators | jq -c -r '.error')
+				if [ $result != "" ] && [ $result != "{}" ]
+				then
+					if [ "$2" = "onlyme" ]
+					then
+						echo ""
+						echo "Searching your node ${NODEID}"
+						cvald=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getCurrentValidators","params": {},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/P | jq '.result.validators')
+						for row in $(echo "${cvald}" | jq -r '.[] | select(.id=="'${NODEID}'") | @base64'); do
+							_jq() {
+								echo ${row} | base64 --decode | jq -r ${1}
+							}
+							addr=$(echo $(_jq '.address'))
+							if [ $addr = $PCHAIN ]
+							then
+								cnt=1
+								startt=$(echo $(_jq '.startTime'))
+								endt=$(echo $(_jq '.endTime'))
+								stakea=$(echo $(_jq '.stakeAmount'))
+								nid=$(echo $(_jq '.id'))
+								echo ""
+								echo "Your Node's active staking details:"
+								echo "NodeID\t\t${nid}"
+								echo "P-Chain Address\t${addr}"
+								echo "Stake Amount\t${stakea} AVA"
+								if [ $ARCH = "macos" ]
+								then
+									echo "Starting Time\t$(date -r ${startt} '+%a %d %b %Y %T %Z')"
+									echo "Ending Time\t$(date -r ${endt} '+%a %d %b %Y %T %Z')"
+								else
+									echo "Starting Time\t$(date -d @${startt} '+%a %d %b %Y %T %Z')"
+									echo "Ending Time\t$(date -d @${endt} '+%a %d %b %Y %T %Z')"
+								fi
+								break
+							fi
+						done
+						if [ -z $cnt ]
+						then
+							echo ""
+							echo "Your node is not in active validators"
+							echo "Your staking time might be over"
+						fi
+					else
+						echo ""
+						echo "Listing all validators"
+						avald=$(echo $gvalidators | jq '.result.validators')
+						cnt=1
+						for row in $(echo "${avald}" | jq -r '.[] | @base64'); do
+							_jq() {
+								echo ${row} | base64 --decode | jq -r ${1}
+							}
+							addr=$(echo $(_jq '.address'))
+							startt=$(echo $(_jq '.startTime'))
+							endt=$(echo $(_jq '.endTime'))
+							stakea=$(echo $(_jq '.stakeAmount'))
+							nid=$(echo $(_jq '.id'))
+							echo ""
+							echo "Node ${cnt}"
+							echo "NodeID\t\t${nid}"
+							echo "P-Chain Address\t${addr}"
+							echo "Stake Amount\t${stakea} AVA"
+							if [ $ARCH = "macos" ]
+							then
+								echo "Starting Time\t$(date -r ${startt} '+%a %d %b %Y %T %Z')"
+								echo "Ending Time\t$(date -r ${endt} '+%a %d %b %Y %T %Z')"
+							else
+								echo "Starting Time\t$(date -d @${startt} '+%a %d %b %Y %T %Z')"
+								echo "Ending Time\t$(date -d @${endt} '+%a %d %b %Y %T %Z')"
+							fi
+							cnt=$(expr $cnt + 1)
+						done
+					fi
+				fi
+			fi
+
+			if [ $1 = "stakeissued" ]
+			then
+				echo "Checking issued balance"
+				getnonce=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getAccount","params":{"address":"'$PCHAIN'"},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+				result=$(echo $getnonce | jq -c -r '.result')
+				error=$(echo $getnonce | jq -c -r '.error')
+				if [ $result != "" ] && [ $result != "{}" ]
+				then
+					nonce=$(echo $getnonce | jq -r ".result.nonce")
+					result2=$(echo $getnonce | jq -c -r '.result')
+					error2=$(echo $getnonce | jq -c -r '.error')
+					if [ $result2 != "" ] && [ $result2 != "{}" ]
+					then
+						isbln=$(echo $getnonce | jq -r ".result.balance")
+						echo "Issued balance" $isbln "AVA"
+						if [ $isbln > 0 ]
+						then
+							echo ""
+							echo "Creating unsigned transaction"
+							inonce=$(expr $nonce + 1)
+							echo "Staking " $isbln "AVA"
+							cust=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.addDefaultSubnetValidator","params": {"id":"'$NODEID'","payerNonce":'$inonce',"destination":"'$PCHAIN'","startTime":'$(date --date="5 minutes" +%s)',"endTime":'$(date --date="$STAKEL days" +%s)',"stakeAmount":'$isbln'},"id": 1}' -H 'content-type:application/json;' $HOST:$PORT/ext/P)
+							result3=$(echo $cust | jq -c -r '.result')
+							error3=$(echo $cust | jq -c -r '.error')
+							if [ $result3 != "" ] && [ $result3 != "{}" ]
+							then
+								unstx=$(echo $cust | jq -r ".result.unsignedTx")
+								echo "Success. TX created"
+								echo $unstx
+								echo ""
+								echo "Signing the transaction"
+								sigtx=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.sign","params": {"tx":"'$unstx'","signer":"'$PCHAIN'","username":"'$USERN'","password":"'$PASSW'"},"id": 2}' -H 'content-type:application/json;' $HOST:$PORT/ext/P)
+								result4=$(echo $sigtx | jq -c -r '.result')
+								error4=$(echo $sigtx | jq -c -r '.error')
+								if [ $result4 != "" ] && [ $result4 != "{}" ]
+								then
+									echo "Success. Transaction signed"
+									echo $sigtx | jq -r ".result.tx"
+									echo ""
+									stx=$(echo $sigtx | jq -r ".result.tx")
+									echo "Issuing transaction"
+									issutx=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.issueTx","params": {"tx":"'$stx'"},"id": 3}' -H 'content-type:application/json;' $HOST:$PORT/ext/P)
+									result5=$(echo $issutx | jq -c -r '.result')
+									error5=$(echo $issutx | jq -c -r '.error')
+									if [ $result5 != "" ] && [ $result5 != "{}" ]
+									then
+										echo "Success. Transaction issued"
+										echo $issutx | jq -r ".result.txID"
+										echo ""
+										echo "Getting pending validators"
+										pvald=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getPendingValidators","params": {},"id": 4}' -H 'content-type:application/json;' $HOST:$PORT/ext/P | jq '.result.validators')
+
+										for row in $(echo "${pvald}" | jq -r '.[] | @base64'); do
+											_jq() {
+												echo ${row} | base64 --decode | jq -r ${1}
+											}
+											addr=$(echo $(_jq '.address'))
+											if [ $addr = $PCHAIN ]
+											then
+												startt=$(echo $(_jq '.startTime'))
+												endt=$(echo $(_jq '.endTime'))
+												stakea=$(echo $(_jq '.stakeAmount'))
+												nid=$(echo $(_jq '.id'))
+												echo ""
+												echo "Your Node's pending staking details:"
+												echo "NodeID\t\t${nid}"
+												echo "P-Chain Address\t${addr}"
+												echo "Stake Amount\t${stakea} AVA"
+												if [ $ARCH = "macos" ]
+												then
+													echo "Starting Time\t$(date -r ${startt} '+%a %d %b %Y %T %Z')"
+													echo "Ending Time\t$(date -r ${endt} '+%a %d %b %Y %T %Z')"
+												else
+													echo "Starting Time\t$(date -d @${startt} '+%a %d %b %Y %T %Z')"
+													echo "Ending Time\t$(date -d @${endt} '+%a %d %b %Y %T %Z')"
+												fi
+												break
+											fi
+										done
+									else
+										echo "Error issuing transaction"
+										echo $issutx
+									fi
+								else
+									echo "Error signing transaction"
+									echo $sigtx
+								fi
+							else
+								echo "Error creating unsigned transaction"
+								echo $cust
+							fi
+						fi
+					fi
+				else
+				echo "Error Checking Issued Balance:"
+				echo $getnonce
+				fi
+			fi
+
+
+			if [ $1 = "listpaccounts" ]
+			then
+				accounts=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.listAccounts","params":{"username":"'$USERN'","password":"'$PASSW'"}, "id":1}' -H 'content-type:application/json;' $HOST:$PORT/ext/bc/P)
+				if echo $accounts >/dev/null 2>&1 | jq -r ".result.accounts"; then
+				acc=$(echo $accounts | jq '.result.accounts')
+					cnt=0
+					echo ""
+					echo "P-Chain Accounts in your keystore:"
+					echo ""
+					echo "#N\tP-Chain Account\t\t\t\tBalance"
+					for row in $(echo "${acc}" | jq -r '.[] | @base64'); do
+						_jq() {
+							echo ${row} | base64 --decode | jq -r ${1}
+						}
+						addr=$(echo $(_jq '.address'))
+						balance=$(echo $(_jq '.balance'))
+						cnt=$(expr $cnt + 1)
+						echo "${cnt}.\t${addr}\t${balance}"
+					done
+					if [ $cnt = 0 ]
+					then
+						echo ""
+						echo "No accounts in your keystore"
+					fi
+				else
+					echo "Error listing accounts"
+					echo $accounts | jq -r ".error.message"
+				fi
+			fi
+
+			if [ $1 = "pendingvalidators" ]
+			then
+				echo "Getting pending validators"
+				pvald=$(curl -s -X POST --data '{"jsonrpc": "2.0","method": "platform.getPendingValidators","params": {},"id": 4}' -H 'content-type:application/json;' $HOST:$PORT/ext/P | jq '.result.validators')
+				if [ ! -z $2 ] &&  [ $2 = "onlyme" ]
+				then
+					echo ""
+					echo "Searching your node in pending validators"
+					fn=0
+					for row in $(echo "${pvald}" | jq -r '.[] | @base64'); do
+						_jq() {
+							echo ${row} | base64 --decode | jq -r ${1}
+						}
+						addr=$(echo $(_jq '.address'))
+						if [ $addr = $PCHAIN ]
+						then
+							fn=1
+							startt=$(echo $(_jq '.startTime'))
+							endt=$(echo $(_jq '.endTime'))
+							stakea=$(echo $(_jq '.stakeAmount'))
+							nid=$(echo $(_jq '.id'))
+							echo ""
+							echo "Your Node's pending staking details:"
+							echo "NodeID\t\t${nid}"
+							echo "P-Chain Address\t${addr}"
+							echo "Stake Amount\t${stakea} AVA"
+							if [ $ARCH = "macos" ]
+							then
+								echo "Starting Time\t$(date -r ${startt} '+%a %d %b %Y %T %Z')"
+								echo "Ending Time\t$(date -r ${endt} '+%a %d %b %Y %T %Z')"
+							else
+								echo "Starting Time\t$(date -d @${startt} '+%a %d %b %Y %T %Z')"
+								echo "Ending Time\t$(date -d @${endt} '+%a %d %b %Y %T %Z')"
+							fi
+							break
+						fi
+					done
+					if [ $fn = 0 ]
+					then
+						echo ""
+						echo "Your node is not in pending validators"
+					fi
+				else
+					cnt=0
+					for row in $(echo "${pvald}" | jq -r '.[] | @base64'); do
+						_jq() {
+							echo ${row} | base64 --decode | jq -r ${1}
+						}
+						addr=$(echo $(_jq '.address'))
+						startt=$(echo $(_jq '.startTime'))
+						endt=$(echo $(_jq '.endTime'))
+						stakea=$(echo $(_jq '.stakeAmount'))
+						nid=$(echo $(_jq '.id'))
+						cnt=$(expr $cnt + 1)
+						echo ""
+						echo "Node ${cnt}"
+						echo "NodeID\t\t${nid}"
+						echo "P-Chain Address\t${addr}"
+						echo "Stake Amount\t${stakea} AVA"
+						if [ $ARCH = "macos" ]
+						then
+							echo "Starting Time\t$(date -r ${startt} '+%a %d %b %Y %T %Z')"
+							echo "Ending Time\t$(date -r ${endt} '+%a %d %b %Y %T %Z')"
+						else
+							echo "Starting Time\t$(date -d @${startt} '+%a %d %b %Y %T %Z')"
+							echo "Ending Time\t$(date -d @${endt} '+%a %d %b %Y %T %Z')"
+						fi
+					done
+					if [ $cnt = 0 ]
+					then
+						echo ""
+						echo "No pending validators"
+					fi
+				fi
+			fi
+		fi
+	fi
+else
+	echo ""
+	echo "Warning! Settings not found"
+	echo ""
+	echo "A settings.txt file must exists in the same directory of ./"$(basename "$0")
+	echo ""
+	echo "These variables are required:"
+	echo "USERN=\"your_username\""
+	echo "PASSW=\"your_password\""
+	echo "NODEID=\"your_nodeid\""
+	echo "AVAADR=\"your_ava_address\""
+	echo "PCHAIN=\"your_pchain_id\""
+	echo "HOST=\"ip_address_or_url_of_host\" (generally 127.0.0.1 or localhost)"
+	echo "PORT=\"api_port\" (9650 by default)"
+	echo "STAKEL=number_of_days_for_staking (30 by default)"
+fi
+echo ""
